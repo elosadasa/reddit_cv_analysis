@@ -5,6 +5,7 @@ import sys
 import os
 import io
 
+
 def read_zst_file(file_path):
     """
     Generator function to read lines from a .zst compressed file.
@@ -15,6 +16,7 @@ def read_zst_file(file_path):
             text_stream = io.TextIOWrapper(reader, encoding='utf-8')
             for line in text_stream:
                 yield line.strip()
+
 
 def load_list_from_file(file_path):
     """
@@ -28,6 +30,7 @@ def load_list_from_file(file_path):
             if item:
                 items.add(item.lower())
     return items
+
 
 def main(input_file, subreddits_file, bot_file, output_directory=None):
     # Determine the output directory
@@ -44,8 +47,7 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
     stats_output_file = os.path.join(output_directory, f'{base_name}_stats.txt')
 
     # Load subreddit names from the provided file
-    subreddits = load_list_from_file(subreddits_file)
-    subreddits_set = set(sub.lower() for sub in subreddits)
+    subreddits_set = load_list_from_file(subreddits_file)
 
     # Load bot usernames from the provided file
     bot_usernames_set = load_list_from_file(bot_file)
@@ -92,11 +94,6 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
                 filtered_quarantine += 1
                 continue
 
-            # Filter out posts whose author is blocked
-            if obj.get('author_is_blocked') == True:
-                filtered_author_blocked += 1
-                continue
-
             # Filter out posts that have been banned by somebody
             if obj.get('banned_by') is not None:
                 filtered_banned += 1
@@ -121,40 +118,50 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
             data.append({
                 'id': obj.get('id'),
                 'author': obj.get('author'),
-                'created_utc': obj.get('created_utc'),
-                'subreddit': obj.get('subreddit'),
+                'author_fullname': obj.get('author_fullname'),
+                'author_is_blocked': obj.get('author_is_blocked'),
                 'title': obj.get('title'),
                 'selftext': obj.get('selftext'),
-                'body': obj.get('body'),
-                'score': obj.get('score'),
-                'num_comments': obj.get('num_comments'),
-                'archived': obj.get('archived'),
-                'author_fullname': obj.get('author_fullname'),
-                'can_gild': obj.get('can_gild'),
-                'can_mod_post': obj.get('can_mod_post'),
-                'category': obj.get('category'),
-                'created': obj.get('created'),
-                'top_awarded_type': obj.get('top_awarded_type'),
-                'subreddit_type': obj.get('subreddit_type'),
-                'subreddit_subscribers': obj.get('subreddit_subscribers'),
-                'subreddit_id': obj.get('subreddit_id'),
-                'stickied': obj.get('stickied'),
-                'spoiler': obj.get('spoiler'),
-                'saved': obj.get('saved'),
+                'created_utc': obj.get('created_utc'),
                 'retrieved_on': obj.get('retrieved_on'),
-                'pinned': obj.get('pinned'),
-                'num_reports': obj.get('num_reports'),
-                'num_crossposts': obj.get('num_crossposts'),
-                'name': obj.get('name'),
-                'no_follow': obj.get('no_follow'),
-                'locked': obj.get('locked'),
-                'likes': obj.get('likes'),
-                'hide_score': obj.get('hide_score'),
-                'hidden': obj.get('hidden'),
-                'gilded': obj.get('gilded'),
-                'edited': obj.get('edited'),
+                'subreddit': obj.get('subreddit'),
+                'subreddit_id': obj.get('subreddit_id'),
+                'subreddit_type': obj.get('subreddit_type'),
+                'score': obj.get('score'),
+                'ups': obj.get('ups'),
                 'downs': obj.get('downs'),
+                'upvote_ratio': obj.get('upvote_ratio'),
+                'num_comments': obj.get('num_comments'),
+                'total_awards_received': obj.get('total_awards_received'),
+                'gilded': obj.get('gilded'),
                 'distinguished': obj.get('distinguished'),
+                'stickied': obj.get('stickied'),
+                'is_self': obj.get('is_self'),
+                'is_video': obj.get('is_video'),
+                'is_original_content': obj.get('is_original_content'),
+                'locked': obj.get('locked'),
+                'name': obj.get('name'),
+                'saved': obj.get('saved'),
+                'spoiler': obj.get('spoiler'),
+                'gildings': obj.get('gildings'),
+                'all_awardings': obj.get('all_awardings'),
+                'awarders': obj.get('awarders'),
+                'media_only': obj.get('media_only'),
+                'can_gild': obj.get('can_gild'),
+                'contest_mode': obj.get('contest_mode'),
+                'no_follow': obj.get('no_follow'),
+                'author_premium': obj.get('author_premium'),
+                'author_patreon_flair': obj.get('author_patreon_flair'),
+                'author_flair_text': obj.get('author_flair_text'),
+                'num_crossposts': obj.get('num_crossposts'),
+                'pinned': obj.get('pinned'),
+                'permalink': obj.get('permalink'),
+                'url': obj.get('url'),
+                'category': obj.get('category'),
+                'hide_score': obj.get('hide_score'),
+                'media': obj.get('media'),
+                'media_metadata': obj.get('media_metadata'),
+                'secure_media': obj.get('secure_media'),
                 # Add other fields as needed, excluding the filtering fields
             })
         except json.JSONDecodeError:
@@ -185,7 +192,8 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
         stats_file.write(f"Total lines processed: {total_lines}\n")
         stats_file.write(f"Total lines kept for analysis: {total_kept}\n")
         stats_file.write(f"Total lines filtered out: {total_filtered}\n")
-        stats_file.write(f"Lines filtered out due to not being in interest subreddits: {filtered_not_interest_subreddit}\n")
+        stats_file.write(
+            f"Lines filtered out due to not being in interest subreddits: {filtered_not_interest_subreddit}\n")
         stats_file.write(f"Lines filtered out due to bad lines: {filtered_bad_lines}\n")
         stats_file.write(f"Lines filtered out due to bots: {filtered_bots}\n")
         stats_file.write(f"Lines filtered out due to quarantined subreddits: {filtered_quarantine}\n")
@@ -204,11 +212,41 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
     if data:
         # Convert list of JSON objects to DataFrame
         df = pd.DataFrame(data)
-        # Convert 'created_utc' to datetime
-        df['created_utc'] = pd.to_datetime(df['created_utc'], unit='s', utc=True)
-        # Convert 'created' to datetime if present
-        if 'created' in df.columns:
-            df['created'] = pd.to_datetime(df['created'], unit='s', utc=True)
+
+        # Convert timestamp fields to datetime
+        timestamp_columns = ['created_utc', 'retrieved_on']
+        for col in timestamp_columns:
+            df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
+
+        # Convert boolean fields
+        boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'is_self', 'is_video',
+                           'is_original_content',
+                           'locked', 'saved', 'spoiler', 'media_only', 'can_gild',
+                           'contest_mode', 'no_follow', 'author_patreon_flair',
+                           'pinned', 'hide_score']
+        for col in boolean_columns:
+            df[col] = df[col].astype('boolean')
+
+        # Convert numeric fields
+        numeric_columns = ['score', 'ups', 'downs', 'num_comments',
+                           'total_awards_received', 'gilded', 'num_crossposts', 'upvote_ratio']
+        for col in numeric_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Serialize complex fields to JSON strings
+        json_columns = ['gildings', 'all_awardings', 'awarders', 'media', 'media_metadata', 'secure_media']
+        for col in json_columns:
+            df[col] = df[col].apply(lambda x: json.dumps(x) if x else 'null')
+
+        # Handle 'distinguished' field
+        df['distinguished'] = df['distinguished'].fillna('none')
+
+        # Fill missing strings with empty strings
+        string_columns = ['permalink', 'url', 'title', 'selftext', 'author', 'subreddit',
+                          'author_fullname', 'name', 'author_flair_text', 'category']
+        for col in string_columns:
+            df[col] = df[col].fillna('')
+
         # Save to CSV
         df.to_csv(output_csv_file, index=False)
         # Save to Parquet
@@ -216,6 +254,7 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
         print(f"Data saved to {output_csv_file} and {output_parquet_file}")
     else:
         print("No data kept for analysis after filtering.")
+
 
 if __name__ == "__main__":
     import argparse

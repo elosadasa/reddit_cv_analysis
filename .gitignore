@@ -321,6 +321,7 @@ cython_debug/
 # Ouput files produced
 *.csv
 *.parquet
+*.txt
 
 # OS X files
 .DS_Store

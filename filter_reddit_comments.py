@@ -47,8 +47,7 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
     stats_output_file = os.path.join(output_directory, f'{base_name}_comments_stats.txt')
 
     # Load subreddit names from the provided file
-    subreddits = load_list_from_file(subreddits_file)
-    subreddits_set = set(sub.lower() for sub in subreddits)
+    subreddits_set = load_list_from_file(subreddits_file)
 
     # Load bot usernames from the provided file
     bot_usernames_set = load_list_from_file(bot_file)
@@ -120,58 +119,56 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
 
             # Collect relevant fields
             data.append({
-                'unrepliable_reason': obj.get('unrepliable_reason'),
-                'ups': obj.get('ups'),
-                'user_reports': obj.get('user_reports'),
-                'subreddit_type': obj.get('subreddit_type'),
-                'top_awarded_type': obj.get('top_awarded_type'),
-                'replies': obj.get('replies'),
-                'report_reasons': obj.get('report_reasons'),
+                'id': obj.get('id'),
+                'author': obj.get('author'),
+                'author_fullname': obj.get('author_fullname'),
+                'author_premium': obj.get('author_premium'),
+                'author_is_blocked': obj.get('author_is_blocked'),
+                'body': obj.get('body'),
+                'created_utc': obj.get('created_utc'),
                 'retrieved_on': obj.get('retrieved_on'),
-                'saved': obj.get('saved'),
-                'score': obj.get('score'),
-                'score_hidden': obj.get('score_hidden'),
-                'send_replies': obj.get('send_replies'),
-                'stickied': obj.get('stickied'),
                 'subreddit': obj.get('subreddit'),
                 'subreddit_id': obj.get('subreddit_id'),
-                'total_awards_received': obj.get('total_awards_received'),
-                'mod_reports': obj.get('mod_reports'),
-                'name': obj.get('name'),
-                'created': obj.get('created'),
-                'created_utc': obj.get('created_utc'),
-                'distinguished': obj.get('distinguished'),
+                'subreddit_type': obj.get('subreddit_type'),
+                'score': obj.get('score'),
+                'ups': obj.get('ups'),
                 'downs': obj.get('downs'),
-                'edited': obj.get('edited'),
+                'total_awards_received': obj.get('total_awards_received'),
                 'gilded': obj.get('gilded'),
-                'gildings': obj.get('gildings'),
-                'id': obj.get('id'),
-                'is_submitter': obj.get('is_submitter'),
-                'likes': obj.get('likes'),
-                'link_id': obj.get('link_id'),
-                'locked': obj.get('locked'),
-                'no_follow': obj.get('no_follow'),
-                'num_reports': obj.get('num_reports'),
-                'parent_id': obj.get('parent_id'),
+                'distinguished': obj.get('distinguished'),
+                'stickied': obj.get('stickied'),
+                'controversiality': obj.get('controversiality'),
                 'permalink': obj.get('permalink'),
+                'parent_id': obj.get('parent_id'),
+                'link_id': obj.get('link_id'),
+                'score_hidden': obj.get('score_hidden'),
+                'collapsed': obj.get('collapsed'),
                 'collapsed_reason': obj.get('collapsed_reason'),
                 'collapsed_reason_code': obj.get('collapsed_reason_code'),
-                'body': obj.get('body'),
+                'no_follow': obj.get('no_follow'),
                 'can_gild': obj.get('can_gild'),
                 'can_mod_post': obj.get('can_mod_post'),
-                'collapsed': obj.get('collapsed'),
-                'author_fullname': obj.get('author_fullname'),
-                'author_is_blocked': obj.get('author_is_blocked'),
-                'author_patreon_flair': obj.get('author_patreon_flair'),
-                'author_premium': obj.get('author_premium'),
-                'awarders': obj.get('awarders'),
-                'banned_at_utc': obj.get('banned_at_utc'),
+                'is_submitter': obj.get('is_submitter'),
+                'send_replies': obj.get('send_replies'),
+                'archived': obj.get('archived'),
+                'locked': obj.get('locked'),
+                'name': obj.get('name'),
+                'saved': obj.get('saved'),
+                'gildings': obj.get('gildings'),
                 'all_awardings': obj.get('all_awardings'),
+                'awarders': obj.get('awarders'),
+                'author_patreon_flair': obj.get('author_patreon_flair'),
+                'likes': obj.get('likes'),
+                'mod_reports': obj.get('mod_reports'),
+                'user_reports': obj.get('user_reports'),
+                'report_reasons': obj.get('report_reasons'),
+                'num_reports': obj.get('num_reports'),
+                'banned_at_utc': obj.get('banned_at_utc'),
                 'approved_at_utc': obj.get('approved_at_utc'),
                 'approved_by': obj.get('approved_by'),
-                'archived': obj.get('archived'),
                 'associated_award': obj.get('associated_award'),
-                'author': obj.get('author'),
+                'unrepliable_reason': obj.get('unrepliable_reason'),
+                # Add other fields as needed
             })
         except json.JSONDecodeError:
             filtered_bad_lines += 1
@@ -219,10 +216,40 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
     if data:
         # Convert list of JSON objects to DataFrame
         df = pd.DataFrame(data)
-        # Convert 'created_utc' to datetime
-        df['created_utc'] = pd.to_datetime(df['created_utc'], unit='s', utc=True)
-        df['retrieved_on'] = pd.to_datetime(df['retrieved_on'], unit='s', utc=True)
-        df['created'] = pd.to_datetime(df['created'], unit='s', utc=True)
+
+        # Convert timestamp fields to datetime
+        timestamp_columns = ['created_utc', 'retrieved_on', 'approved_at_utc', 'banned_at_utc']
+        for col in timestamp_columns:
+            df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
+
+        # Convert boolean fields
+        boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'score_hidden',
+                           'collapsed', 'no_follow', 'can_gild', 'can_mod_post', 'is_submitter',
+                           'send_replies', 'archived', 'locked', 'saved', 'author_patreon_flair',
+                           'likes']
+        for col in boolean_columns:
+            df[col] = df[col].astype('boolean')
+
+        # Convert numeric fields
+        numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
+        for col in numeric_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Serialize complex fields to JSON strings
+        json_columns = ['gildings', 'all_awardings', 'awarders', 'mod_reports', 'user_reports', 'report_reasons']
+        for col in json_columns:
+            df[col] = df[col].apply(lambda x: json.dumps(x) if x else '[]')
+
+        # Handle 'distinguished' field
+        df['distinguished'] = df['distinguished'].fillna('none')
+
+        # Fill missing strings with empty strings
+        string_columns = ['permalink', 'body', 'author', 'subreddit', 'author_fullname', 'name',
+                          'unrepliable_reason', 'collapsed_reason', 'collapsed_reason_code',
+                          'associated_award']
+        for col in string_columns:
+            df[col] = df[col].fillna('')
+
         # Save to CSV
         df.to_csv(output_csv_file, index=False)
         # Save to Parquet
