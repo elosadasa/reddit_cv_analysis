@@ -11,7 +11,7 @@ def read_zst_file(file_path):
     Generator function to read lines from a .zst compressed file.
     """
     with open(file_path, 'rb') as f:
-        dctx = zstd.ZstdDecompressor()
+        dctx = zstd.ZstdDecompressor(max_window_size=0)
         with dctx.stream_reader(f) as reader:
             text_stream = io.TextIOWrapper(reader, encoding='utf-8')
             for line in text_stream:
