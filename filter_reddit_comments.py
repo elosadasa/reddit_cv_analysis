@@ -32,6 +32,20 @@ def load_list_from_file(file_path):
     return items
 
 
+def write_batch_to_disk(df_batch, output_csv_file, output_parquet_file):
+    """
+    Write a batch of data to CSV and Parquet files.
+    """
+    # Save to CSV in append mode
+    df_batch.to_csv(output_csv_file, mode='a', index=False, header=not os.path.exists(output_csv_file))
+    # Save to Parquet (append mode requires handling partitions)
+    if not os.path.exists(output_parquet_file):
+        df_batch.to_parquet(output_parquet_file, index=False)
+    else:
+        # Append to Parquet by partitioning
+        df_batch.to_parquet(output_parquet_file, index=False, append=True)
+
+
 def main(input_file, subreddits_file, bot_file, output_directory=None):
     # Determine the output directory
     if output_directory is None:
@@ -53,6 +67,7 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
     bot_usernames_set = load_list_from_file(bot_file)
 
     data = []
+    BATCH_SIZE = 10000  # Adjust based on available memory
     total_lines = 0
     filtered_not_interest_subreddit = 0
     filtered_bad_lines = 0
@@ -170,15 +185,96 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
                 'unrepliable_reason': obj.get('unrepliable_reason'),
                 # Add other fields as needed
             })
+
+            # If batch size is reached, process and save the batch
+            if len(data) >= BATCH_SIZE:
+                # Convert list of JSON objects to DataFrame
+                df_batch = pd.DataFrame(data)
+
+                # Data type conversions and cleaning
+                # Convert timestamp fields to datetime
+                timestamp_columns = ['created_utc', 'retrieved_on', 'approved_at_utc', 'banned_at_utc']
+                for col in timestamp_columns:
+                    df_batch[col] = pd.to_datetime(df_batch[col], unit='s', utc=True, errors='coerce')
+
+                # Convert boolean fields
+                boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'score_hidden',
+                                   'collapsed', 'no_follow', 'can_gild', 'can_mod_post', 'is_submitter',
+                                   'send_replies', 'archived', 'locked', 'saved', 'author_patreon_flair',
+                                   'likes']
+                for col in boolean_columns:
+                    df_batch[col] = df_batch[col].astype('boolean')
+
+                # Convert numeric fields
+                numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
+                for col in numeric_columns:
+                    df_batch[col] = pd.to_numeric(df_batch[col], errors='coerce')
+
+                # Serialize complex fields to JSON strings
+                json_columns = ['gildings', 'all_awardings', 'awarders', 'mod_reports', 'user_reports',
+                                'report_reasons']
+                for col in json_columns:
+                    df_batch[col] = df_batch[col].apply(lambda x: json.dumps(x) if x else '[]')
+
+                # Handle 'distinguished' field
+                df_batch['distinguished'] = df_batch['distinguished'].fillna('none')
+
+                # Fill missing strings with empty strings
+                string_columns = ['permalink', 'body', 'author', 'subreddit', 'author_fullname', 'name',
+                                  'unrepliable_reason', 'collapsed_reason', 'collapsed_reason_code',
+                                  'associated_award']
+                for col in string_columns:
+                    df_batch[col] = df_batch[col].fillna('')
+
+                # Write the batch to disk
+                write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+
+                # Clear the data list to free memory
+                data.clear()
+
         except json.JSONDecodeError:
             filtered_bad_lines += 1
             continue  # Skip lines that cannot be parsed
+
+    # Process any remaining data after the loop
+    if data:
+        df_batch = pd.DataFrame(data)
+        # Repeat the data type conversions and cleaning as above
+        timestamp_columns = ['created_utc', 'retrieved_on', 'approved_at_utc', 'banned_at_utc']
+        for col in timestamp_columns:
+            df_batch[col] = pd.to_datetime(df_batch[col], unit='s', utc=True, errors='coerce')
+
+        boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'score_hidden',
+                           'collapsed', 'no_follow', 'can_gild', 'can_mod_post', 'is_submitter',
+                           'send_replies', 'archived', 'locked', 'saved', 'author_patreon_flair',
+                           'likes']
+        for col in boolean_columns:
+            df_batch[col] = df_batch[col].astype('boolean')
+
+        numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
+        for col in numeric_columns:
+            df_batch[col] = pd.to_numeric(df_batch[col], errors='coerce')
+
+        json_columns = ['gildings', 'all_awardings', 'awarders', 'mod_reports', 'user_reports', 'report_reasons']
+        for col in json_columns:
+            df_batch[col] = df_batch[col].apply(lambda x: json.dumps(x) if x else '[]')
+
+        df_batch['distinguished'] = df_batch['distinguished'].fillna('none')
+
+        string_columns = ['permalink', 'body', 'author', 'subreddit', 'author_fullname', 'name',
+                          'unrepliable_reason', 'collapsed_reason', 'collapsed_reason_code',
+                          'associated_award']
+        for col in string_columns:
+            df_batch[col] = df_batch[col].fillna('')
+
+        # Write the final batch to disk
+        write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
 
     # Counts
     total_filtered = (filtered_not_interest_subreddit + filtered_bad_lines + filtered_bots +
                       filtered_banned + filtered_crowd_control + filtered_non_text +
                       filtered_controversial + filtered_removed)
-    total_kept = len(data)
+    total_kept = total_lines - total_filtered
 
     print(f"Total lines processed: {total_lines}")
     print(f"Total lines kept for analysis: {total_kept}")
@@ -213,50 +309,7 @@ def main(input_file, subreddits_file, bot_file, output_directory=None):
         for subreddit, count in filtered_subreddit_counts.items():
             stats_file.write(f"{subreddit}: {count}\n")
 
-    if data:
-        # Convert list of JSON objects to DataFrame
-        df = pd.DataFrame(data)
-
-        # Convert timestamp fields to datetime
-        timestamp_columns = ['created_utc', 'retrieved_on', 'approved_at_utc', 'banned_at_utc']
-        for col in timestamp_columns:
-            df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
-
-        # Convert boolean fields
-        boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'score_hidden',
-                           'collapsed', 'no_follow', 'can_gild', 'can_mod_post', 'is_submitter',
-                           'send_replies', 'archived', 'locked', 'saved', 'author_patreon_flair',
-                           'likes']
-        for col in boolean_columns:
-            df[col] = df[col].astype('boolean')
-
-        # Convert numeric fields
-        numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # Serialize complex fields to JSON strings
-        json_columns = ['gildings', 'all_awardings', 'awarders', 'mod_reports', 'user_reports', 'report_reasons']
-        for col in json_columns:
-            df[col] = df[col].apply(lambda x: json.dumps(x) if x else '[]')
-
-        # Handle 'distinguished' field
-        df['distinguished'] = df['distinguished'].fillna('none')
-
-        # Fill missing strings with empty strings
-        string_columns = ['permalink', 'body', 'author', 'subreddit', 'author_fullname', 'name',
-                          'unrepliable_reason', 'collapsed_reason', 'collapsed_reason_code',
-                          'associated_award']
-        for col in string_columns:
-            df[col] = df[col].fillna('')
-
-        # Save to CSV
-        df.to_csv(output_csv_file, index=False)
-        # Save to Parquet
-        df.to_parquet(output_parquet_file, index=False)
-        print(f"Data saved to {output_csv_file} and {output_parquet_file}")
-    else:
-        print("No data kept for analysis after filtering.")
+    print(f"Data saved to {output_csv_file} and {output_parquet_file}")
 
 
 if __name__ == "__main__":
