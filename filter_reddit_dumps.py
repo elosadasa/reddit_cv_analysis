@@ -32,7 +32,6 @@ def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_s
         submissions_files = [f for f in os.listdir(submissions_dir) if f.endswith('.zst')]
         for filename in submissions_files:
             input_file = os.path.abspath(os.path.join(submissions_dir, filename))
-            logging.info(f"Processing submissions file: {input_file}")
             try:
                 filter_reddit_submissions.process_submissions(
                     input_file=input_file,
@@ -51,7 +50,6 @@ def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_s
         comments_files = [f for f in os.listdir(comments_dir) if f.endswith('.zst')]
         for filename in comments_files:
             input_file = os.path.abspath(os.path.join(comments_dir, filename))
-            logging.info(f"Processing comments file: {input_file}")
             try:
                 filter_reddit_comments.process_comments(
                     input_file=input_file,

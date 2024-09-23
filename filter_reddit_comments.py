@@ -1,52 +1,10 @@
 # filter_reddit_comments.py
 
-import zstandard as zstd
+import os
 import json
 import pandas as pd
-import os
-import io
 import logging
-
-def read_zst_file(file_path):
-    """
-    Generator function to read lines from a .zst compressed file.
-    """
-    with open(file_path, 'rb') as f:
-        dctx = zstd.ZstdDecompressor(max_window_size=0)
-        with dctx.stream_reader(f) as reader:
-            text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-            for line in text_stream:
-                yield line.strip()
-
-def load_list_from_file(file_path):
-    """
-    Load items from a text file.
-    Each line in the file should contain one item.
-    """
-    items = set()
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            item = line.strip()
-            if item:
-                items.add(item.lower())
-    return items
-
-def write_batch_to_disk(df_batch, output_csv_file, output_parquet_file):
-    """
-    Write a batch of data to CSV and Parquet files.
-    """
-    # Save to CSV in append mode
-    df_batch.to_csv(output_csv_file, mode='a', index=False, header=not os.path.exists(output_csv_file))
-
-    # Save to Parquet
-    if not os.path.exists(output_parquet_file):
-        df_batch.to_parquet(output_parquet_file, index=False)
-    else:
-        # Append to Parquet requires handling partitions or using pyarrow's append functionality
-        # Here, we concatenate the existing Parquet file with the new batch
-        existing_df = pd.read_parquet(output_parquet_file)
-        combined_df = pd.concat([existing_df, df_batch], ignore_index=True)
-        combined_df.to_parquet(output_parquet_file, index=False)
+from reddit_utils import read_zst_file, load_list_from_file, write_batch_to_disk
 
 def process_comments(input_file, subreddits_file, bot_usernames_file, output_directory=None, batch_size=10000):
     """
@@ -56,9 +14,8 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
 
     # Determine the output directory
     if output_directory is None:
-        output_directory = os.getcwd()  # Use current working directory
+        output_directory = os.getcwd()
     else:
-        # Ensure output directory exists
         os.makedirs(output_directory, exist_ok=True)
 
     # Derive output filenames from the input .zst filename
@@ -67,10 +24,8 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
     output_parquet_file = os.path.join(output_directory, f'{base_name}.parquet')
     stats_output_file = os.path.join(output_directory, f'{base_name}_stats.txt')
 
-    # Load subreddit names from the provided file
+    # Load subreddit names and bot usernames
     subreddits_set = load_list_from_file(subreddits_file)
-
-    # Load bot usernames from the provided file
     bot_usernames_set = load_list_from_file(bot_usernames_file)
 
     data = []
@@ -197,9 +152,11 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
 
             # If batch size is reached, process and save the batch
             if len(data) >= batch_size:
-                process_and_save_batch(
-                    data, output_csv_file, output_parquet_file
-                )
+                df_batch = pd.DataFrame(data)
+                # Apply data processing steps directly
+                df_batch = process_comments_data(df_batch)
+                # Write the batch to disk
+                write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
                 data.clear()
 
         except json.JSONDecodeError:
@@ -208,9 +165,9 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
 
     # Process any remaining data after the loop
     if data:
-        process_and_save_batch(
-            data, output_csv_file, output_parquet_file
-        )
+        df_batch = pd.DataFrame(data)
+        df_batch = process_comments_data(df_batch)
+        write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
         data.clear()
 
     # Calculate total filtered lines
@@ -240,17 +197,14 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
 
     logging.info(f"Data saved to {output_csv_file} and {output_parquet_file}")
 
-def process_and_save_batch(data, output_csv_file, output_parquet_file):
+def process_comments_data(df):
     """
-    Convert the data list to a DataFrame, process it, and save to disk.
+    Apply data processing steps specific to comments.
     """
-    df_batch = pd.DataFrame(data)
-
-    # Data type conversions and cleaning
     # Convert timestamp fields to datetime
     timestamp_columns = ['created_utc', 'retrieved_on', 'approved_at_utc', 'banned_at_utc']
     for col in timestamp_columns:
-        df_batch[col] = pd.to_datetime(df_batch[col], unit='s', utc=True, errors='coerce')
+        df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
 
     # Convert boolean fields
     boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'score_hidden',
@@ -258,31 +212,29 @@ def process_and_save_batch(data, output_csv_file, output_parquet_file):
                        'send_replies', 'archived', 'locked', 'saved', 'author_patreon_flair',
                        'likes']
     for col in boolean_columns:
-        df_batch[col] = df_batch[col].astype('boolean')
+        df[col] = df[col].astype('boolean')
 
     # Convert numeric fields
     numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
     for col in numeric_columns:
-        df_batch[col] = pd.to_numeric(df_batch[col], errors='coerce')
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
     # Serialize complex fields to JSON strings
     json_columns = ['gildings', 'all_awardings', 'awarders', 'mod_reports', 'user_reports', 'report_reasons']
     for col in json_columns:
-        df_batch[col] = df_batch[col].apply(lambda x: json.dumps(x) if x else '[]')
+        df[col] = df[col].apply(lambda x: json.dumps(x) if x else '[]')
 
     # Handle 'distinguished' field
-    df_batch['distinguished'] = df_batch['distinguished'].fillna('none')
+    df['distinguished'] = df['distinguished'].fillna('none')
 
     # Fill missing strings with empty strings
     string_columns = ['permalink', 'body', 'author', 'subreddit', 'author_fullname', 'name',
                       'unrepliable_reason', 'collapsed_reason', 'collapsed_reason_code',
                       'associated_award']
     for col in string_columns:
-        df_batch[col] = df_batch[col].fillna('')
+        df[col] = df[col].fillna('')
 
-    # Write the batch to disk
-    write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
-    logging.info(f"Batch written to {output_csv_file} and {output_parquet_file}")
+    return df
 
 def main():
     import argparse
