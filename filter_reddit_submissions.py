@@ -141,7 +141,9 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
             if len(data) >= batch_size:
                 df_batch = pd.DataFrame(data)
                 # Apply data processing steps directly
+                logging.debug(f"Number of records before processing: {len(df_batch)}")
                 df_batch = process_submissions_data(df_batch)
+                logging.debug(f"Number of records after processing: {len(df_batch)}")
                 # Write the batch to disk
                 write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
                 data.clear()
@@ -153,7 +155,9 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
     # Process any remaining data
     if data:
         df_batch = pd.DataFrame(data)
+        logging.debug(f"Number of records before processing: {len(df_batch)}")
         df_batch = process_submissions_data(df_batch)
+        logging.debug(f"Number of records after processing: {len(df_batch)}")
         write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
         data.clear()
 
