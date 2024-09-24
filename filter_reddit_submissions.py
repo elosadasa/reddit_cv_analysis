@@ -6,10 +6,8 @@ import pandas as pd
 import logging
 from reddit_utils import read_zst_file, load_list_from_file, write_batch_to_disk
 
+
 def process_submissions(input_file, subreddits_file, bot_usernames_file, output_directory=None, batch_size=10000):
-    """
-    Process a single submissions .zst file.
-    """
     logging.info(f"Processing submissions file: {input_file}")
 
     # Determine the output directory
@@ -30,6 +28,9 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
 
     data = []
     total_lines = 0
+    total_filtered = 0
+    total_processed = 0
+    total_written = 0
     filtered_counts = {
         'not_interest_subreddit': 0,
         'bad_lines': 0,
@@ -140,42 +141,59 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
 
             if len(data) >= batch_size:
                 df_batch = pd.DataFrame(data)
+                rows_before_processing = len(df_batch)
+
                 # Apply data processing steps directly
-                logging.debug(f"Number of records before processing: {len(df_batch)}")
                 df_batch = process_submissions_data(df_batch)
-                logging.debug(f"Number of records after processing: {len(df_batch)}")
+                rows_after_processing = len(df_batch)
+                rows_dropped = rows_before_processing - rows_after_processing
+
+                # Update counts
+                total_processed += rows_after_processing
+                total_filtered += rows_dropped
+
                 # Write the batch to disk
                 write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+                total_written += len(df_batch)
                 data.clear()
 
-        except json.JSONDecodeError:
+                logging.debug(f"Processed batch of size {rows_after_processing}. Total written so far: {total_written}")
+
+        except json.JSONDecodeError as e:
             filtered_counts['bad_lines'] += 1
+            logging.error(f"JSON decode error at line {total_lines}: {e}")
             continue  # Skip lines that cannot be parsed
 
     # Process any remaining data
     if data:
         df_batch = pd.DataFrame(data)
-        logging.debug(f"Number of records before processing: {len(df_batch)}")
+        rows_before_processing = len(df_batch)
+
         df_batch = process_submissions_data(df_batch)
-        logging.debug(f"Number of records after processing: {len(df_batch)}")
+        rows_after_processing = len(df_batch)
+        rows_dropped = rows_before_processing - rows_after_processing
+
+        # Update counts
+        total_processed += rows_after_processing
+        total_filtered += rows_dropped
+
         write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+        total_written += len(df_batch)
         data.clear()
 
-    # Counts
-    total_filtered = sum(filtered_counts.values())
-    total_kept = total_lines - total_filtered
+        logging.debug(f"Processed final batch of size {rows_after_processing}. Total written: {total_written}")
 
-    # Logging the counts
-    logging.info(f"Total lines processed: {total_lines}")
-    logging.info(f"Total lines kept for analysis: {total_kept}")
-    logging.info(f"Total lines filtered out: {total_filtered}")
-    for key, value in filtered_counts.items():
-        logging.info(f"Lines filtered out due to {key.replace('_', ' ')}: {value}")
+    # Final counts
+    logging.info(f"Total lines read: {total_lines}")
+    logging.info(f"Total lines processed: {total_processed}")
+    logging.info(f"Total lines filtered: {total_filtered}")
+    logging.info(f"Total lines written: {total_written}")
 
     # Save counts to stats_output_file
     with open(stats_output_file, 'w', encoding='utf-8') as stats_file:
-        stats_file.write(f"Total lines processed: {total_lines}\n")
-        stats_file.write(f"Total lines kept for analysis: {total_kept}\n")
+        stats_file.write(f"Total lines read: {total_lines}\n")
+        stats_file.write(f"Total lines processed: {total_processed}\n")
+        stats_file.write(f"Total lines kept for analysis: {total_written}\n")
         stats_file.write(f"Total lines filtered out: {total_filtered}\n")
         for key, value in filtered_counts.items():
             stats_file.write(f"Lines filtered out due to {key.replace('_', ' ')}: {value}\n")
@@ -188,6 +206,7 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
 
     logging.info(f"Data saved to {output_csv_file} and {output_parquet_file}")
 
+
 def process_submissions_data(df):
     """
     Apply data processing steps specific to submissions.
@@ -196,6 +215,9 @@ def process_submissions_data(df):
     timestamp_columns = ['created_utc', 'retrieved_on']
     for col in timestamp_columns:
         df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Convert boolean fields
     boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'is_self', 'is_video',
@@ -204,18 +226,27 @@ def process_submissions_data(df):
                        'pinned', 'hide_score']
     for col in boolean_columns:
         df[col] = df[col].astype('boolean')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Convert numeric fields
     numeric_columns = ['score', 'ups', 'downs', 'num_comments',
                        'total_awards_received', 'gilded', 'num_crossposts', 'upvote_ratio']
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Serialize complex fields to JSON strings
     json_columns = ['gildings', 'all_awardings', 'awarders', 'media',
                     'media_metadata', 'secure_media']
     for col in json_columns:
         df[col] = df[col].apply(lambda x: json.dumps(x) if x else 'null')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after serialization.")
 
     # Handle 'distinguished' field
     df['distinguished'] = df['distinguished'].fillna('none')
@@ -225,8 +256,12 @@ def process_submissions_data(df):
                       'author_fullname', 'name', 'author_flair_text', 'category']
     for col in string_columns:
         df[col] = df[col].fillna('')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after fillna.")
 
     return df
+
 
 def main():
     import argparse
@@ -240,8 +275,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Configure logging before any logging statements
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
     process_submissions(
         input_file=args.input_file,
@@ -250,6 +285,7 @@ def main():
         output_directory=args.output_directory,
         batch_size=args.batch_size
     )
+
 
 if __name__ == "__main__":
     main()
