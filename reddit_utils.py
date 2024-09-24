@@ -39,6 +39,8 @@ def write_batch_to_disk(df_batch, output_csv_file, output_parquet_file):
     """
     Write a batch of data to CSV and Parquet files.
     """
+    logging.debug(f"Writing batch of size {len(df_batch)} to {output_csv_file} and {output_parquet_file}")
+    
     # Save to CSV in append mode
     df_batch.to_csv(output_csv_file, mode='a', index=False, header=not os.path.exists(output_csv_file))
 
