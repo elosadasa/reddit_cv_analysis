@@ -4,12 +4,11 @@ import os
 import json
 import pandas as pd
 import logging
+import csv
 from reddit_utils import read_zst_file, load_list_from_file, write_batch_to_disk
 
+
 def process_comments(input_file, subreddits_file, bot_usernames_file, output_directory=None, batch_size=10000):
-    """
-    Process a single comments .zst file.
-    """
     logging.info(f"Processing comments file: {input_file}")
 
     # Determine the output directory
@@ -30,19 +29,26 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
 
     data = []
     total_lines = 0
+    total_filtered = 0
+    total_processed = 0
+    total_written = 0
     filtered_counts = {
         'not_interest_subreddit': 0,
         'bad_lines': 0,
         'bots': 0,
+        'quarantine': 0,
+        'author_blocked': 0,
         'banned': 0,
-        'crowd_control': 0,
-        'non_text': 0,
-        'controversial': 0,
-        'removed': 0
+        'removed': 0,
+        'removed_category': 0,
+        'over_18': 0
     }
 
     subreddit_counts = {}
     filtered_subreddit_counts = {}
+
+    # Initialize header_written flag
+    header_written = os.path.exists(output_csv_file)
 
     for line in read_zst_file(input_file):
         total_lines += 1
@@ -54,46 +60,36 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
             subreddit = obj.get('subreddit', '').lower()
             subreddit_counts[subreddit] = subreddit_counts.get(subreddit, 0) + 1
 
-            # Filter: Subreddit of interest
             if subreddit not in subreddits_set:
                 filtered_counts['not_interest_subreddit'] += 1
                 continue
 
-            # Increment filtered_subreddit_counts
             filtered_subreddit_counts[subreddit] = filtered_subreddit_counts.get(subreddit, 0) + 1
 
             author = obj.get('author', '').lower()
-
-            # Filter: Bots
             if author in bot_usernames_set or author == '[deleted]':
                 filtered_counts['bots'] += 1
                 continue
 
-            # Filter: Banned comments
+            # Apply additional filters
+            if obj.get('quarantine') == True:
+                filtered_counts['quarantine'] += 1
+                continue
+
             if obj.get('banned_by') is not None:
                 filtered_counts['banned'] += 1
                 continue
 
-            # Filter: Collapsed due to crowd control
-            if obj.get('collapsed_because_crowd_control'):
-                filtered_counts['crowd_control'] += 1
-                continue
-
-            # Filter: Non-textual comments
-            if obj.get('comment_type') is not None:
-                filtered_counts['non_text'] += 1
-                continue
-
-            # Filter: High controversiality
-            if obj.get('controversiality') == 1:
-                filtered_counts['controversial'] += 1
-                continue
-
-            # Filter: Removed comments
-            if (obj.get('mod_reason_by') is not None or
-                obj.get('mod_reason_title') is not None or
-                obj.get('removal_reason') is not None):
+            if obj.get('removed_by') is not None:
                 filtered_counts['removed'] += 1
+                continue
+
+            if obj.get('removed_by_category') is not None:
+                filtered_counts['removed_category'] += 1
+                continue
+
+            if obj.get('over_18') == True:
+                filtered_counts['over_18'] += 1
                 continue
 
             # Collect relevant fields
@@ -101,7 +97,6 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
                 'id': obj.get('id'),
                 'author': obj.get('author'),
                 'author_fullname': obj.get('author_fullname'),
-                'author_premium': obj.get('author_premium'),
                 'author_is_blocked': obj.get('author_is_blocked'),
                 'body': obj.get('body'),
                 'created_utc': obj.get('created_utc'),
@@ -150,41 +145,61 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
                 # Add other fields as needed
             })
 
-            # If batch size is reached, process and save the batch
             if len(data) >= batch_size:
                 df_batch = pd.DataFrame(data)
+                rows_before_processing = len(df_batch)
+
                 # Apply data processing steps directly
                 df_batch = process_comments_data(df_batch)
+                rows_after_processing = len(df_batch)
+                rows_dropped = rows_before_processing - rows_after_processing
+
+                # Update counts
+                total_processed += rows_after_processing
+                total_filtered += rows_dropped
+
                 # Write the batch to disk
-                write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+                header_written = write_batch_to_disk(df_batch, output_csv_file, output_parquet_file, header_written)
+                total_written += len(df_batch)
                 data.clear()
 
-        except json.JSONDecodeError:
+                logging.debug(f"Processed batch of size {rows_after_processing}. Total written so far: {total_written}")
+
+        except json.JSONDecodeError as e:
             filtered_counts['bad_lines'] += 1
+            logging.error(f"JSON decode error at line {total_lines}: {e}")
             continue  # Skip lines that cannot be parsed
 
-    # Process any remaining data after the loop
+    # Process any remaining data
     if data:
         df_batch = pd.DataFrame(data)
+        rows_before_processing = len(df_batch)
+
         df_batch = process_comments_data(df_batch)
-        write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+        rows_after_processing = len(df_batch)
+        rows_dropped = rows_before_processing - rows_after_processing
+
+        # Update counts
+        total_processed += rows_after_processing
+        total_filtered += rows_dropped
+
+        header_written = write_batch_to_disk(df_batch, output_csv_file, output_parquet_file, header_written)
+        total_written += len(df_batch)
         data.clear()
 
-    # Calculate total filtered lines
-    total_filtered = sum(filtered_counts.values())
-    total_kept = total_lines - total_filtered
+        logging.debug(f"Processed final batch of size {rows_after_processing}. Total written: {total_written}")
 
-    # Logging the counts
-    logging.info(f"Total lines processed: {total_lines}")
-    logging.info(f"Total lines kept for analysis: {total_kept}")
-    logging.info(f"Total lines filtered out: {total_filtered}")
-    for key, value in filtered_counts.items():
-        logging.info(f"Lines filtered out due to {key.replace('_', ' ')}: {value}")
+    # Final counts
+    logging.info(f"Total lines read: {total_lines}")
+    logging.info(f"Total lines processed: {total_processed}")
+    logging.info(f"Total lines filtered: {total_filtered}")
+    logging.info(f"Total lines written: {total_written}")
 
     # Save counts to stats_output_file
     with open(stats_output_file, 'w', encoding='utf-8') as stats_file:
-        stats_file.write(f"Total lines processed: {total_lines}\n")
-        stats_file.write(f"Total lines kept for analysis: {total_kept}\n")
+        stats_file.write(f"Total lines read: {total_lines}\n")
+        stats_file.write(f"Total lines processed: {total_processed}\n")
+        stats_file.write(f"Total lines kept for analysis: {total_written}\n")
         stats_file.write(f"Total lines filtered out: {total_filtered}\n")
         for key, value in filtered_counts.items():
             stats_file.write(f"Lines filtered out due to {key.replace('_', ' ')}: {value}\n")
@@ -197,14 +212,23 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
 
     logging.info(f"Data saved to {output_csv_file} and {output_parquet_file}")
 
+
 def process_comments_data(df):
     """
     Apply data processing steps specific to comments.
     """
+    # Replace newline characters in text fields
+    text_columns = ['body']
+    for col in text_columns:
+        df[col] = df[col].astype(str).str.replace('\n', ' ', regex=False).str.replace('\r', ' ', regex=False)
+
     # Convert timestamp fields to datetime
     timestamp_columns = ['created_utc', 'retrieved_on', 'approved_at_utc', 'banned_at_utc']
     for col in timestamp_columns:
         df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Convert boolean fields
     boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'score_hidden',
@@ -213,16 +237,25 @@ def process_comments_data(df):
                        'likes']
     for col in boolean_columns:
         df[col] = df[col].astype('boolean')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Convert numeric fields
     numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Serialize complex fields to JSON strings
     json_columns = ['gildings', 'all_awardings', 'awarders', 'mod_reports', 'user_reports', 'report_reasons']
     for col in json_columns:
-        df[col] = df[col].apply(lambda x: json.dumps(x) if x else '[]')
+        df[col] = df[col].apply(lambda x: json.dumps(x) if x else 'null')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after serialization.")
 
     # Handle 'distinguished' field
     df['distinguished'] = df['distinguished'].fillna('none')
@@ -233,8 +266,12 @@ def process_comments_data(df):
                       'associated_award']
     for col in string_columns:
         df[col] = df[col].fillna('')
+        num_missing = df[col].isna().sum()
+        if num_missing > 0:
+            logging.debug(f"Column '{col}' has {num_missing} missing values after fillna.")
 
     return df
+
 
 def main():
     import argparse
@@ -245,11 +282,10 @@ def main():
     parser.add_argument('bot_usernames_file', help='Path to the bot_usernames.txt file')
     parser.add_argument('--output_directory', help='Optional output directory for the results')
     parser.add_argument('--batch_size', type=int, default=10000, help='Number of records to process per batch')
-
     args = parser.parse_args()
 
-    # Configure logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Configure logging before any logging statements
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
     process_comments(
         input_file=args.input_file,
@@ -258,6 +294,7 @@ def main():
         output_directory=args.output_directory,
         batch_size=args.batch_size
     )
+
 
 if __name__ == "__main__":
     main()

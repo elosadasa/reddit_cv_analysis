@@ -4,6 +4,7 @@ import os
 import json
 import pandas as pd
 import logging
+import csv
 from reddit_utils import read_zst_file, load_list_from_file, write_batch_to_disk
 
 
@@ -45,6 +46,9 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
 
     subreddit_counts = {}
     filtered_subreddit_counts = {}
+
+    # Initialize header_written flag
+    header_written = os.path.exists(output_csv_file)
 
     for line in read_zst_file(input_file):
         total_lines += 1
@@ -153,7 +157,7 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
                 total_filtered += rows_dropped
 
                 # Write the batch to disk
-                write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+                header_written = write_batch_to_disk(df_batch, output_csv_file, output_parquet_file, header_written)
                 total_written += len(df_batch)
                 data.clear()
 
@@ -177,7 +181,7 @@ def process_submissions(input_file, subreddits_file, bot_usernames_file, output_
         total_processed += rows_after_processing
         total_filtered += rows_dropped
 
-        write_batch_to_disk(df_batch, output_csv_file, output_parquet_file)
+        header_written = write_batch_to_disk(df_batch, output_csv_file, output_parquet_file, header_written)
         total_written += len(df_batch)
         data.clear()
 
@@ -211,6 +215,11 @@ def process_submissions_data(df):
     """
     Apply data processing steps specific to submissions.
     """
+    # Replace newline characters in text fields
+    text_columns = ['title', 'selftext', 'author_flair_text', 'category']
+    for col in text_columns:
+        df[col] = df[col].astype(str).str.replace('\n', ' ', regex=False).str.replace('\r', ' ', regex=False)
+
     # Convert timestamp fields to datetime
     timestamp_columns = ['created_utc', 'retrieved_on']
     for col in timestamp_columns:
@@ -272,7 +281,6 @@ def main():
     parser.add_argument('bot_usernames_file', help='Path to the bot_usernames.txt file')
     parser.add_argument('--output_directory', help='Optional output directory for the results')
     parser.add_argument('--batch_size', type=int, default=10000, help='Number of records to process per batch')
-
     args = parser.parse_args()
 
     # Configure logging before any logging statements
