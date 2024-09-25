@@ -36,12 +36,11 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
         'not_interest_subreddit': 0,
         'bad_lines': 0,
         'bots': 0,
-        'quarantine': 0,
-        'author_blocked': 0,
         'banned': 0,
-        'removed': 0,
-        'removed_category': 0,
-        'over_18': 0
+        'crowd_control': 0,
+        'non_text': 0,
+        'controversial': 0,
+        'removed': 0
     }
 
     subreddit_counts = {}
@@ -71,25 +70,31 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
                 filtered_counts['bots'] += 1
                 continue
 
-            # Apply additional filters
-            if obj.get('quarantine') == True:
-                filtered_counts['quarantine'] += 1
-                continue
+            # Apply additional filters specific to comments
 
+            # Filter: Banned comments
             if obj.get('banned_by') is not None:
                 filtered_counts['banned'] += 1
                 continue
 
-            if obj.get('removed_by') is not None:
+            # Filter: Collapsed due to crowd control
+            if obj.get('collapsed_because_crowd_control'):
+                filtered_counts['crowd_control'] += 1
+                continue
+
+            # Filter: Non-textual comments
+            if obj.get('comment_type') is not None:
+                filtered_counts['non_text'] += 1
+                continue
+
+            # Filter: High controversiality
+            if obj.get('controversiality') == 1:
+                filtered_counts['controversial'] += 1
+                continue
+
+            # Filter: Removed comments
+            if obj.get('removed_by') is not None or obj.get('removed_by_category') is not None:
                 filtered_counts['removed'] += 1
-                continue
-
-            if obj.get('removed_by_category') is not None:
-                filtered_counts['removed_category'] += 1
-                continue
-
-            if obj.get('over_18') == True:
-                filtered_counts['over_18'] += 1
                 continue
 
             # Collect relevant fields
@@ -98,6 +103,7 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
                 'author': obj.get('author'),
                 'author_fullname': obj.get('author_fullname'),
                 'author_is_blocked': obj.get('author_is_blocked'),
+                'author_premium': obj.get('author_premium'),
                 'body': obj.get('body'),
                 'created_utc': obj.get('created_utc'),
                 'retrieved_on': obj.get('retrieved_on'),
@@ -149,7 +155,7 @@ def process_comments(input_file, subreddits_file, bot_usernames_file, output_dir
                 df_batch = pd.DataFrame(data)
                 rows_before_processing = len(df_batch)
 
-                # Apply data processing steps directly
+                # Apply data processing steps
                 df_batch = process_comments_data(df_batch)
                 rows_after_processing = len(df_batch)
                 rows_dropped = rows_before_processing - rows_after_processing
@@ -242,7 +248,7 @@ def process_comments_data(df):
             logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
 
     # Convert numeric fields
-    numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded']
+    numeric_columns = ['score', 'ups', 'downs', 'total_awards_received', 'num_reports', 'gilded', 'controversiality']
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
         num_missing = df[col].isna().sum()
