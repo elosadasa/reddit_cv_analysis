@@ -10,7 +10,7 @@ import fastparquet
 import csv
 
 
-def read_zst_file(file_path, max_window_size=None):
+def read_zst_file(file_path, max_window_size=2147483648):
     """
     Generator function to read lines from a .zst compressed file.
     """
