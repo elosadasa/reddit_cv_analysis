@@ -223,10 +223,15 @@ def process_submissions_data(df):
     # Convert timestamp fields to datetime
     timestamp_columns = ['created_utc', 'retrieved_on']
     for col in timestamp_columns:
+        num_missing_before = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_before} missing values before conversion.")
         df[col] = pd.to_datetime(df[col], unit='s', utc=True, errors='coerce')
-        num_missing = df[col].isna().sum()
-        if num_missing > 0:
-            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
+        num_missing_after = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_after} missing values after conversion.")
+        # Check if missing values increased after conversion
+        if num_missing_after > num_missing_before:
+            num_failed_conversion = num_missing_after - num_missing_before
+            logging.warning(f"{num_failed_conversion} values in '{col}' could not be converted to datetime.")
 
     # Convert boolean fields
     boolean_columns = ['author_premium', 'author_is_blocked', 'stickied', 'is_self', 'is_video',
@@ -234,40 +239,63 @@ def process_submissions_data(df):
                        'can_gild', 'contest_mode', 'no_follow', 'author_patreon_flair',
                        'pinned', 'hide_score']
     for col in boolean_columns:
+        num_missing_before = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_before} missing values before conversion.")
         df[col] = df[col].astype('boolean')
-        num_missing = df[col].isna().sum()
-        if num_missing > 0:
-            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
+        num_missing_after = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_after} missing values after conversion.")
+        # Check if missing values increased after conversion
+        if num_missing_after > num_missing_before:
+            num_failed_conversion = num_missing_after - num_missing_before
+            logging.warning(f"{num_failed_conversion} values in '{col}' could not be converted to boolean.")
 
     # Convert numeric fields
     numeric_columns = ['score', 'ups', 'downs', 'num_comments',
                        'total_awards_received', 'gilded', 'num_crossposts', 'upvote_ratio']
     for col in numeric_columns:
+        num_missing_before = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_before} missing values before conversion.")
         df[col] = pd.to_numeric(df[col], errors='coerce')
-        num_missing = df[col].isna().sum()
-        if num_missing > 0:
-            logging.debug(f"Column '{col}' has {num_missing} missing values after conversion.")
+        num_missing_after = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_after} missing values after conversion.")
+        # Check if missing values increased after conversion
+        if num_missing_after > num_missing_before:
+            num_failed_conversion = num_missing_after - num_missing_before
+            logging.warning(f"{num_failed_conversion} values in '{col}' could not be converted to numeric.")
 
     # Serialize complex fields to JSON strings
     json_columns = ['gildings', 'all_awardings', 'awarders', 'media',
                     'media_metadata', 'secure_media']
     for col in json_columns:
+        num_missing_before = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_before} missing values before serialization.")
         df[col] = df[col].apply(lambda x: json.dumps(x) if x else 'null')
-        num_missing = df[col].isna().sum()
-        if num_missing > 0:
-            logging.debug(f"Column '{col}' has {num_missing} missing values after serialization.")
+        num_missing_after = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_after} missing values after serialization.")
+        # Check if missing values increased after serialization
+        if num_missing_after > num_missing_before:
+            num_failed_serialization = num_missing_after - num_missing_before
+            logging.warning(f"{num_failed_serialization} values in '{col}' could not be serialized to JSON.")
 
     # Handle 'distinguished' field
+    num_missing_before = df['distinguished'].isna().sum()
+    logging.debug(f"Column 'distinguished' has {num_missing_before} missing values before fillna.")
     df['distinguished'] = df['distinguished'].fillna('none')
+    num_missing_after = df['distinguished'].isna().sum()
+    logging.debug(f"Column 'distinguished' has {num_missing_after} missing values after fillna.")
 
     # Fill missing strings with empty strings
     string_columns = ['permalink', 'url', 'title', 'selftext', 'author', 'subreddit',
                       'author_fullname', 'name', 'author_flair_text', 'category']
     for col in string_columns:
+        num_missing_before = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_before} missing values before fillna.")
         df[col] = df[col].fillna('')
-        num_missing = df[col].isna().sum()
-        if num_missing > 0:
-            logging.debug(f"Column '{col}' has {num_missing} missing values after fillna.")
+        num_missing_after = df[col].isna().sum()
+        logging.debug(f"Column '{col}' has {num_missing_after} missing values after fillna.")
+        # If any missing values remain, log a warning
+        if num_missing_after > 0:
+            logging.warning(f"Column '{col}' still has {num_missing_after} missing values after fillna.")
 
     return df
 
