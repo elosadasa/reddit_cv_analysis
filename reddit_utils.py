@@ -10,17 +10,25 @@ import fastparquet
 import csv
 
 
-def read_zst_file(file_path, max_window_size=0):
+def read_zst_file(file_path, max_window_size=None):
     """
     Generator function to read lines from a .zst compressed file.
     """
     logging.debug(f"Reading .zst file: {file_path}")
-    with open(file_path, 'rb') as f:
-        dctx = zstd.ZstdDecompressor(max_window_size=max_window_size)
-        with dctx.stream_reader(f) as reader:
-            text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-            for line in text_stream:
-                yield line.strip()
+    try:
+        with open(file_path, 'rb') as f:
+            dctx = zstd.ZstdDecompressor(max_window_size=max_window_size)
+            with dctx.stream_reader(f) as reader:
+                text_stream = io.TextIOWrapper(reader, encoding='utf-8')
+                for line in text_stream:
+                    yield line.strip()
+    except zstd.ZstdError as e:
+        logging.error(f"Zstd decompression error: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Unexpected error during decompression: {e}")
+        raise
+
 
 
 def load_list_from_file(file_path):
