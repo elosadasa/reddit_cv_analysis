@@ -9,10 +9,26 @@ import filter_reddit_submissions
 import filter_reddit_comments
 
 
-def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_size=10000):
-    # Configure logging
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+def configure_logging(log_file):
+    """
+    Configure logging to write to the specified log file.
+    """
+    # Remove existing handlers
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
 
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, mode='a', encoding='utf-8'),
+            # Uncomment the next line to also log to console
+            # logging.StreamHandler()
+        ]
+    )
+
+
+def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_size=10000):
     # Create output root directory if it doesn't exist
     os.makedirs(output_root, exist_ok=True)
 
@@ -38,6 +54,12 @@ def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_s
             output_parquet_file = os.path.join(output_submissions_dir, f'{base_name}.parquet')
             stats_output_file = os.path.join(output_submissions_dir, f'{base_name}_stats.txt')
             completion_marker = os.path.join(output_submissions_dir, f'{base_name}_completed.txt')
+            log_file = os.path.join(output_submissions_dir, f'{base_name}.log')
+
+            # Configure logging for this file
+            configure_logging(log_file)
+            logging.info(f"Processing submissions file: {input_file}")
+            logging.info(f"Log file created at {log_file}")
 
             # Check if processing is already completed
             if os.path.exists(completion_marker):
@@ -67,8 +89,9 @@ def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_s
                 # Mark processing as completed
                 with open(completion_marker, 'w') as marker_file:
                     marker_file.write('Processing completed successfully.')
+                logging.info(f"Processing of submissions file {input_file} completed successfully.")
             except Exception as e:
-                logging.error(f"Error processing submissions file {input_file}: {e}")
+                logging.error(f"Error processing submissions file {input_file}: {e}", exc_info=True)
     else:
         logging.warning(f"Submissions directory not found: {submissions_dir}")
 
@@ -82,6 +105,12 @@ def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_s
             output_parquet_file = os.path.join(output_comments_dir, f'{base_name}.parquet')
             stats_output_file = os.path.join(output_comments_dir, f'{base_name}_stats.txt')
             completion_marker = os.path.join(output_comments_dir, f'{base_name}_completed.txt')
+            log_file = os.path.join(output_comments_dir, f'{base_name}.log')
+
+            # Configure logging for this file
+            configure_logging(log_file)
+            logging.info(f"Processing comments file: {input_file}")
+            logging.info(f"Log file created at {log_file}")
 
             # Check if processing is already completed
             if os.path.exists(completion_marker):
@@ -111,8 +140,9 @@ def main(dataset_root, output_root, subreddits_file, bot_usernames_file, batch_s
                 # Mark processing as completed
                 with open(completion_marker, 'w') as marker_file:
                     marker_file.write('Processing completed successfully.')
+                logging.info(f"Processing of comments file {input_file} completed successfully.")
             except Exception as e:
-                logging.error(f"Error processing comments file {input_file}: {e}")
+                logging.error(f"Error processing comments file {input_file}: {e}", exc_info=True)
     else:
         logging.warning(f"Comments directory not found: {comments_dir}")
 
